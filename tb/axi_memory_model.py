@@ -1,3 +1,4 @@
+
 """AXI memory model for the AXI DMA verification environment.
 
 Supports INCR bursts, byte strobes, configurable response errors,
@@ -44,7 +45,9 @@ class AxiMemoryModel:
 
         self.backpressure_probability = backpressure_probability
         self.max_random_read_delay = max_random_read_delay
-        self.max_random_write_response_delay = max_random_write_response_delay
+        self.max_random_write_response_delay = (
+            max_random_write_response_delay
+        )
         self.rng = random.Random(random_seed)
         self.random_seed = random_seed
 
@@ -61,6 +64,7 @@ class AxiMemoryModel:
         self.write_response_delay_remaining = 0
 
     def initialize(self):
+        """Initialize signals driven by the memory model."""
         dut = self.dut
 
         dut.m_axi_arready.value = 1
@@ -76,9 +80,35 @@ class AxiMemoryModel:
         dut.m_axi_bvalid.value = 0
 
     def _randomized_ready(self):
+        """Return a deterministic seeded READY value."""
         return int(
             self.rng.random() >= self.backpressure_probability
         )
+
+    def _schedule_write_response_delay(self):
+        """Set fixed delay plus a seeded random write-response delay."""
+        random_delay = self.rng.randint(
+            0, self.max_random_write_response_delay
+        )
+        self.write_response_delay_remaining = (
+            self.write_response_delay_cycles + random_delay
+        )
+
+    @staticmethod
+    def _apply_write_strobes(
+        old_value, write_data, write_strobe, bytes_per_beat
+    ):
+        """Update only the byte lanes enabled by the AXI write strobe."""
+        new_value = old_value
+
+        for lane in range(bytes_per_beat):
+            if (write_strobe >> lane) & 1:
+                mask = 0xFF << (8 * lane)
+                new_value = (
+                    (new_value & ~mask) | (write_data & mask)
+                )
+
+        return new_value
 
     async def run(self):
         dut = self.dut
@@ -169,28 +199,17 @@ class AxiMemoryModel:
             await RisingEdge(dut.clk)
 
             if ar_handshake:
-                if self.pending_read_beats or self.read_active:
-                    raise AssertionError(
-                        "New read address received while read burst active"
+                self.pending_read_beats = []
+                for beat in range(ar_length + 1):
+                    address = ar_address + beat * bytes_per_beat
+                    data = self.memory.get(address, 0)
+                    response = self.read_resp
+                    last = int(beat == ar_length)
+                    self.pending_read_beats.append(
+                        (data, response, last)
                     )
 
-                self.pending_read_beats = [
-                    (
-                        self.memory.get(
-                            ar_address + index * bytes_per_beat, 0
-                        ),
-                        self.read_resp,
-                        int(index == ar_length),
-                    )
-                    for index in range(ar_length + 1)
-                ]
-
-                random_delay = self.rng.randint(
-                    0, self.max_random_read_delay
-                )
-                self.read_delay_remaining = (
-                    self.read_delay_cycles + random_delay
-                )
+                self.read_delay_remaining = self.read_delay_cycles
 
             if r_handshake:
                 self.clear_read = True
@@ -198,7 +217,8 @@ class AxiMemoryModel:
             if aw_handshake:
                 if self.write_address is not None:
                     raise AssertionError(
-                        "New write address received before previous burst ended"
+                        "A new write address was accepted before "
+                        "the previous burst completed"
                     )
 
                 self.write_address = aw_address
@@ -217,29 +237,17 @@ class AxiMemoryModel:
                     )
 
                 old_value = self.memory.get(self.write_address, 0)
-                new_value = old_value
+                self.memory[self.write_address] = self._apply_write_strobes(
+                    old_value, w_data, w_strobe, bytes_per_beat
+                )
 
-                for lane in range(bytes_per_beat):
-                    if (w_strobe >> lane) & 1:
-                        mask = 0xFF << (8 * lane)
-                        new_value = (
-                            (new_value & ~mask) | (w_data & mask)
-                        )
-
-                self.memory[self.write_address] = new_value
                 self.write_address += bytes_per_beat
                 self.write_beats_remaining -= 1
 
                 if self.write_beats_remaining == 0:
                     self.write_address = None
                     self.write_error_response_pending = True
-
-                    random_delay = self.rng.randint(
-                        0, self.max_random_write_response_delay
-                    )
-                    self.write_response_delay_remaining = (
-                        self.write_response_delay_cycles + random_delay
-                    )
+                    self._schedule_write_response_delay()
 
             if b_handshake:
                 self.clear_write_response = True

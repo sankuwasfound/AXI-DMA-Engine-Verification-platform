@@ -8,6 +8,7 @@ from axi_memory_model import AxiMemoryModel
 
 
 async def start_transfer(dut, memory, src_addr, dst_addr, length_bytes):
+    """Reset the DMA, start the memory model, and launch a transfer."""
     memory.initialize()
 
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
@@ -68,6 +69,7 @@ async def waits_for_delayed_read_response(dut):
             break
 
         waiting_cycles += 1
+
         assert int(dut.done.value) == 0, (
             "DMA asserted done before receiving read data"
         )
@@ -101,6 +103,7 @@ async def waits_for_delayed_read_response(dut):
     for i, expected in enumerate(source.values()):
         address = dst_addr + i * bytes_per_beat
         actual = memory.memory.get(address)
+
         assert actual == expected, (
             f"Destination mismatch at 0x{address:08X}: "
             f"expected 0x{expected:08X}, got {actual!r}"
@@ -134,10 +137,10 @@ async def waits_for_delayed_write_response(dut):
         dut, memory, src_addr, dst_addr, beats * bytes_per_beat
     )
 
-    final_write_seen = False
-    waiting_cycles = 0
-    saw_write_response = False
+    final_write_cycle = None
+    response_cycle = None
     completed = False
+    cycle = 0
 
     for _ in range(300):
         await FallingEdge(dut.clk)
@@ -149,47 +152,55 @@ async def waits_for_delayed_write_response(dut):
             and int(dut.m_axi_wlast.value)
         )
 
+        bvalid_before_edge = int(dut.m_axi_bvalid.value)
+
         await RisingEdge(dut.clk)
         await Timer(1, unit="ps")
+        cycle += 1
 
-        if final_write_handshake:
-            final_write_seen = True
+        if final_write_handshake and final_write_cycle is None:
+            final_write_cycle = cycle
 
-        if final_write_seen and not int(dut.m_axi_bvalid.value):
-            waiting_cycles += 1
+        if bvalid_before_edge and response_cycle is None:
+            response_cycle = cycle
+
+        if final_write_cycle is not None and response_cycle is None:
             assert int(dut.done.value) == 0, (
                 "DMA asserted done before receiving the write response"
             )
 
-        if int(dut.m_axi_bvalid.value):
-            saw_write_response = True
-
-        if int(dut.error.value):
-            raise AssertionError("DMA reported an unexpected error")
+        assert int(dut.error.value) == 0, (
+            "DMA reported an unexpected error"
+        )
 
         if int(dut.done.value):
             completed = True
             break
 
-        if saw_write_response:
-            # The response has arrived; continue until the DMA completes.
-            continue
-
-    assert final_write_seen, "Final write-data beat was never accepted"
-    assert saw_write_response, "Write response did not arrive"
-    assert waiting_cycles >= delay_cycles, (
-        f"Write response was not delayed enough: {waiting_cycles} cycles"
+    assert final_write_cycle is not None, (
+        "Final write-data beat was never accepted"
     )
+    assert response_cycle is not None, "Write response did not arrive"
+
+    measured_delay = response_cycle - final_write_cycle
+
+    assert measured_delay >= delay_cycles, (
+        f"Write response arrived too early: measured {measured_delay} "
+        f"cycles, configured delay {delay_cycles}"
+    )
+
     assert completed, "DMA did not complete after the write response"
 
     for i, expected in enumerate(source.values()):
         address = dst_addr + i * bytes_per_beat
         actual = memory.memory.get(address)
+
         assert actual == expected, (
             f"Destination mismatch at 0x{address:08X}: "
             f"expected 0x{expected:08X}, got {actual!r}"
         )
 
     dut._log.info(
-        f"PASS: DMA waited {waiting_cycles} cycles for delayed write response"
+        f"PASS: measured {measured_delay} cycles from final write beat "
+        f"to BVALID; configured delay was {delay_cycles} cycles"
     )
