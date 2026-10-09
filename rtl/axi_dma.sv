@@ -1,12 +1,13 @@
 module axi_dma #(
     parameter int ADDR_WIDTH = 32,
     parameter int DATA_WIDTH = 32,
-    parameter int MAX_BURST_LEN = 16
+    parameter int MAX_BURST_LEN = 16,
+    parameter int QUEUE_DEPTH = 4
 ) (
     input  logic                   clk,
     input  logic                   rst_n,
 
-    // Control interface
+    // Transfer submission interface
     input  logic                   start,
     input  logic [ADDR_WIDTH-1:0]  src_addr,
     input  logic [ADDR_WIDTH-1:0]  dst_addr,
@@ -14,6 +15,11 @@ module axi_dma #(
     output logic                   busy,
     output logic                   done,
     output logic                   error,
+
+    // Descriptor queue status
+    output logic                   queue_full,
+    output logic                   queue_empty,
+    output logic [$clog2(QUEUE_DEPTH+1)-1:0] queue_level,
 
     // AXI read address channel
     output logic [ADDR_WIDTH-1:0]  m_axi_araddr,
@@ -53,6 +59,9 @@ module axi_dma #(
 
     localparam int BYTES_PER_BEAT = DATA_WIDTH / 8;
     localparam int BYTE_ADDR_BITS = $clog2(BYTES_PER_BEAT);
+    localparam int PTR_WIDTH =
+        (QUEUE_DEPTH > 1) ? $clog2(QUEUE_DEPTH) : 1;
+    localparam int COUNT_WIDTH = $clog2(QUEUE_DEPTH + 1);
 
     typedef enum logic [2:0] {
         IDLE,
@@ -65,22 +74,90 @@ module axi_dma #(
 
     state_t state;
 
+    // Active descriptor registers.
     logic [ADDR_WIDTH-1:0] src_addr_reg;
     logic [ADDR_WIDTH-1:0] dst_addr_reg;
+
+    // Waiting descriptor FIFO. The active descriptor is not stored here.
+    logic [ADDR_WIDTH-1:0] queue_src [0:QUEUE_DEPTH-1];
+    logic [ADDR_WIDTH-1:0] queue_dst [0:QUEUE_DEPTH-1];
+    logic [31:0] queue_len [0:QUEUE_DEPTH-1];
+
+    logic [PTR_WIDTH-1:0] queue_wr_ptr;
+    logic [PTR_WIDTH-1:0] queue_rd_ptr;
+    logic [COUNT_WIDTH-1:0] queue_count;
+
+    logic enqueue_descriptor;
+    logic dequeue_descriptor;
+
+    logic [ADDR_WIDTH-1:0] candidate_src;
+    logic [ADDR_WIDTH-1:0] candidate_dst;
+    logic [31:0] candidate_len;
+    logic candidate_valid;
 
     // Buffer the complete read burst before starting the write burst.
     logic [DATA_WIDTH-1:0] data_buffer [0:MAX_BURST_LEN-1];
 
-    // Counts are zero-based beat indices while processing data.
     logic [31:0] beats_total;
     logic [31:0] read_count;
     logic [31:0] write_count;
+
+    // Queue status describes waiting descriptors only.
+    always_comb begin
+        queue_level = queue_count;
+        queue_empty = (queue_count == 0);
+        queue_full  = (queue_count == COUNT_WIDTH'(QUEUE_DEPTH));
+    end
+
+    // When idle, queued work has priority over a newly submitted request.
+    // If no descriptor is waiting, start launches directly as before.
+    always_comb begin
+        candidate_src = src_addr;
+        candidate_dst = dst_addr;
+        candidate_len = length_bytes;
+
+        if (queue_count != 0) begin
+            candidate_src = queue_src[queue_rd_ptr];
+            candidate_dst = queue_dst[queue_rd_ptr];
+            candidate_len = queue_len[queue_rd_ptr];
+        end
+
+        candidate_valid =
+            (DATA_WIDTH >= 8) &&
+            ((DATA_WIDTH % 8) == 0) &&
+            (BYTES_PER_BEAT != 0) &&
+            (MAX_BURST_LEN >= 1) &&
+            (candidate_len != 0) &&
+            ((candidate_len % BYTES_PER_BEAT) == 0) &&
+            ((candidate_len / BYTES_PER_BEAT) <= MAX_BURST_LEN) &&
+            (candidate_src[BYTE_ADDR_BITS-1:0] == '0) &&
+            (candidate_dst[BYTE_ADDR_BITS-1:0] == '0) &&
+            (({20'b0, candidate_src[11:0]} +
+              {1'b0, candidate_len}) <= 33'd4096) &&
+            (({20'b0, candidate_dst[11:0]} +
+              {1'b0, candidate_len}) <= 33'd4096);
+    end
+
+    // A request starts directly only when idle and the FIFO is empty.
+    // Otherwise it is accepted into the FIFO if a slot is available.
+    always_comb begin
+        enqueue_descriptor = 1'b0;
+        dequeue_descriptor = 1'b0;
+
+        if (start && !((state == IDLE) && (queue_count == 0))) begin
+            if (queue_count < COUNT_WIDTH'(QUEUE_DEPTH))
+                enqueue_descriptor = 1'b1;
+        end
+
+        if ((state == IDLE) && (queue_count != 0))
+            dequeue_descriptor = 1'b1;
+    end
 
     always_comb begin
         m_axi_araddr  = src_addr_reg;
         m_axi_arlen   = 8'(beats_total - 1);
         m_axi_arsize  = 3'(BYTE_ADDR_BITS);
-        m_axi_arburst = 2'b01;  // INCR
+        m_axi_arburst = 2'b01;
         m_axi_arvalid = 1'b0;
 
         m_axi_rready  = 1'b0;
@@ -88,7 +165,7 @@ module axi_dma #(
         m_axi_awaddr  = dst_addr_reg;
         m_axi_awlen   = 8'(beats_total - 1);
         m_axi_awsize  = 3'(BYTE_ADDR_BITS);
-        m_axi_awburst = 2'b01;  // INCR
+        m_axi_awburst = 2'b01;
         m_axi_awvalid = 1'b0;
 
         m_axi_wdata   = '0;
@@ -122,13 +199,16 @@ module axi_dma #(
             end
 
             default: begin
-                // Inactive defaults.
             end
         endcase
     end
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
+            queue_wr_ptr <= '0;
+            queue_rd_ptr <= '0;
+            queue_count  <= '0;
+
             state        <= IDLE;
             src_addr_reg <= '0;
             dst_addr_reg <= '0;
@@ -139,36 +219,51 @@ module axi_dma #(
             done         <= 1'b0;
             error        <= 1'b0;
         end else begin
-            // Status outputs are one-cycle pulses.
             done  <= 1'b0;
             error <= 1'b0;
+
+            // FIFO write and read pointers.
+            if (enqueue_descriptor) begin
+                queue_src[queue_wr_ptr] <= src_addr;
+                queue_dst[queue_wr_ptr] <= dst_addr;
+                queue_len[queue_wr_ptr] <= length_bytes;
+
+                if (queue_wr_ptr == PTR_WIDTH'(QUEUE_DEPTH - 1))
+                    queue_wr_ptr <= '0;
+                else
+                    queue_wr_ptr <= queue_wr_ptr + 1'b1;
+            end
+
+            if (dequeue_descriptor) begin
+                if (queue_rd_ptr == PTR_WIDTH'(QUEUE_DEPTH - 1))
+                    queue_rd_ptr <= '0;
+                else
+                    queue_rd_ptr <= queue_rd_ptr + 1'b1;
+            end
+
+            case ({enqueue_descriptor, dequeue_descriptor})
+                2'b10: queue_count <= queue_count + 1'b1;
+                2'b01: queue_count <= queue_count - 1'b1;
+                default: queue_count <= queue_count;
+            endcase
 
             case (state)
                 IDLE: begin
                     busy <= 1'b0;
 
-                    if (start) begin
-                        // Validate the transfer before issuing AXI traffic.
-                        if ((DATA_WIDTH < 8) ||
-                            ((DATA_WIDTH % 8) != 0) ||
-                            (BYTES_PER_BEAT == 0) ||
-                            (MAX_BURST_LEN < 1) ||
-                            (length_bytes == 0) ||
-                            ((length_bytes % BYTES_PER_BEAT) != 0) ||
-                            ((length_bytes / BYTES_PER_BEAT) > MAX_BURST_LEN) ||
-                            (src_addr[BYTE_ADDR_BITS-1:0] != '0) ||
-                            (dst_addr[BYTE_ADDR_BITS-1:0] != '0) ||
-                            (({20'b0, src_addr[11:0]} + {1'b0, length_bytes}) > 33'd4096) ||
-                            (({20'b0, dst_addr[11:0]} + {1'b0, length_bytes}) > 33'd4096)) begin
-                            error <= 1'b1;
+                    if ((queue_count != 0) || start) begin
+                        if (candidate_valid) begin
+                            src_addr_reg <= candidate_src;
+                            dst_addr_reg <= candidate_dst;
+                            beats_total  <=
+                                candidate_len / BYTES_PER_BEAT;
+                            read_count  <= 0;
+                            write_count <= 0;
+                            busy        <= 1'b1;
+                            state       <= READ_ADDR;
                         end else begin
-                            src_addr_reg <= src_addr;
-                            dst_addr_reg <= dst_addr;
-                            beats_total  <= length_bytes / BYTES_PER_BEAT;
-                            read_count   <= 0;
-                            write_count  <= 0;
-                            busy         <= 1'b1;
-                            state        <= READ_ADDR;
+                            error <= 1'b1;
+                            state <= IDLE;
                         end
                     end
                 end
@@ -182,9 +277,9 @@ module axi_dma #(
 
                 READ_DATA: begin
                     if (m_axi_rvalid && m_axi_rready) begin
-                        // RLAST must be asserted on exactly the final beat.
                         if ((m_axi_rresp != 2'b00) ||
-                            (m_axi_rlast != (read_count == beats_total - 1))) begin
+                            (m_axi_rlast !=
+                             (read_count == beats_total - 1))) begin
                             busy  <= 1'b0;
                             error <= 1'b1;
                             state <= IDLE;
@@ -195,7 +290,7 @@ module axi_dma #(
                                 write_count <= 0;
                                 state       <= WRITE_ADDR;
                             end else begin
-                                read_count <= read_count + 1;
+                                read_count <= read_count + 1'b1;
                             end
                         end
                     end
@@ -210,11 +305,10 @@ module axi_dma #(
 
                 WRITE_DATA: begin
                     if (m_axi_wvalid && m_axi_wready) begin
-                        if (write_count == beats_total - 1) begin
+                        if (write_count == beats_total - 1)
                             state <= WRITE_RESP;
-                        end else begin
-                            write_count <= write_count + 1;
-                        end
+                        else
+                            write_count <= write_count + 1'b1;
                     end
                 end
 
@@ -222,11 +316,10 @@ module axi_dma #(
                     if (m_axi_bvalid && m_axi_bready) begin
                         busy <= 1'b0;
 
-                        if (m_axi_bresp != 2'b00) begin
+                        if (m_axi_bresp != 2'b00)
                             error <= 1'b1;
-                        end else begin
+                        else
                             done <= 1'b1;
-                        end
 
                         state <= IDLE;
                     end
