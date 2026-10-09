@@ -97,8 +97,12 @@ async def randomized_descriptors_preserve_data(dut):
     memory = AxiMemoryModel(
         dut,
         initial_memory=initial_memory,
-        read_delay_cycles=12,
-        write_response_delay_cycles=3,
+        read_delay_cycles=2,
+        write_response_delay_cycles=1,
+        backpressure_probability=0.25,
+        max_random_read_delay=8,
+        max_random_write_response_delay=6,
+        random_seed=RANDOM_SEED,
     )
     await setup_dma(dut, memory)
 

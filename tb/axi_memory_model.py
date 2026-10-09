@@ -1,11 +1,13 @@
 """AXI memory model for the AXI DMA verification environment.
 
 Supports INCR bursts, byte strobes, configurable response errors,
-and configurable read/write response delays.
+fixed and randomized response delays, and seeded AXI backpressure.
 
 This is a simulation model for the DMA's documented AXI subset,
 not a complete AXI4-compliant slave.
 """
+
+import random
 
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
@@ -19,9 +21,19 @@ class AxiMemoryModel:
         write_resp=0,
         read_delay_cycles=0,
         write_response_delay_cycles=0,
+        backpressure_probability=0.0,
+        max_random_read_delay=0,
+        max_random_write_response_delay=0,
+        random_seed=0,
     ):
         if read_delay_cycles < 0 or write_response_delay_cycles < 0:
             raise ValueError("Response delays must be non-negative")
+
+        if not 0.0 <= backpressure_probability <= 1.0:
+            raise ValueError("Backpressure probability must be in [0, 1]")
+
+        if max_random_read_delay < 0 or max_random_write_response_delay < 0:
+            raise ValueError("Random delay limits must be non-negative")
 
         self.dut = dut
         self.memory = dict(initial_memory or {})
@@ -29,6 +41,12 @@ class AxiMemoryModel:
         self.write_resp = write_resp
         self.read_delay_cycles = read_delay_cycles
         self.write_response_delay_cycles = write_response_delay_cycles
+
+        self.backpressure_probability = backpressure_probability
+        self.max_random_read_delay = max_random_read_delay
+        self.max_random_write_response_delay = max_random_write_response_delay
+        self.rng = random.Random(random_seed)
+        self.random_seed = random_seed
 
         self.pending_read_beats = []
         self.read_active = False
@@ -57,6 +75,11 @@ class AxiMemoryModel:
         dut.m_axi_bresp.value = 0
         dut.m_axi_bvalid.value = 0
 
+    def _randomized_ready(self):
+        return int(
+            self.rng.random() >= self.backpressure_probability
+        )
+
     async def run(self):
         dut = self.dut
         bytes_per_beat = len(dut.m_axi_wstrb)
@@ -75,7 +98,15 @@ class AxiMemoryModel:
                 self.write_response_active = False
                 self.clear_write_response = False
 
-            # Count down the initial read-response delay.
+            # Randomize READY only when explicitly enabled.
+            # Otherwise, deterministic tests may drive these signals
+            # themselves to force specific backpressure scenarios.
+            if self.backpressure_probability > 0.0:
+                dut.m_axi_arready.value = self._randomized_ready()
+                dut.m_axi_awready.value = self._randomized_ready()
+                dut.m_axi_wready.value = self._randomized_ready()
+
+            # Start or continue the read-response delay.
             if self.pending_read_beats and not self.read_active:
                 if self.read_delay_remaining > 0:
                     self.read_delay_remaining -= 1
@@ -87,7 +118,7 @@ class AxiMemoryModel:
                     dut.m_axi_rvalid.value = 1
                     self.read_active = True
 
-            # Count down the write-response delay after the final W beat.
+            # Start or continue the write-response delay.
             if (
                 self.write_error_response_pending
                 and not self.write_response_active
@@ -102,6 +133,7 @@ class AxiMemoryModel:
 
             await Timer(1, unit="ps")
 
+            # Capture handshakes while all sampled signals are stable.
             ar_handshake = (
                 int(dut.m_axi_arvalid.value)
                 and int(dut.m_axi_arready.value)
@@ -152,7 +184,13 @@ class AxiMemoryModel:
                     )
                     for index in range(ar_length + 1)
                 ]
-                self.read_delay_remaining = self.read_delay_cycles
+
+                random_delay = self.rng.randint(
+                    0, self.max_random_read_delay
+                )
+                self.read_delay_remaining = (
+                    self.read_delay_cycles + random_delay
+                )
 
             if r_handshake:
                 self.clear_read = True
@@ -162,6 +200,7 @@ class AxiMemoryModel:
                     raise AssertionError(
                         "New write address received before previous burst ended"
                     )
+
                 self.write_address = aw_address
                 self.write_beats_remaining = aw_length + 1
 
@@ -194,8 +233,12 @@ class AxiMemoryModel:
                 if self.write_beats_remaining == 0:
                     self.write_address = None
                     self.write_error_response_pending = True
+
+                    random_delay = self.rng.randint(
+                        0, self.max_random_write_response_delay
+                    )
                     self.write_response_delay_remaining = (
-                        self.write_response_delay_cycles
+                        self.write_response_delay_cycles + random_delay
                     )
 
             if b_handshake:
