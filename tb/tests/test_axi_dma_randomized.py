@@ -7,6 +7,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
+from axi_protocol_monitor import AxiProtocolMonitor
 
 
 CLOCK_NS = 10
@@ -105,6 +106,8 @@ async def randomized_descriptors_preserve_data(dut):
         random_seed=RANDOM_SEED,
     )
     await setup_dma(dut, memory)
+    monitor = AxiProtocolMonitor(dut)
+    monitor_task = cocotb.start_soon(monitor.run())
 
     dut._log.info(
         "M5 randomized test: seed=%d descriptors=%d",
@@ -146,3 +149,7 @@ async def randomized_descriptors_preserve_data(dut):
         RANDOM_SEED,
         NUM_DESCRIPTORS,
     )
+
+    monitor.stop()
+    await monitor_task
+    dut._log.info("AXI protocol stall checks: %s", monitor.report())
