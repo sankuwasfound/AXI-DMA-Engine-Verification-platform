@@ -334,4 +334,36 @@ module axi_dma #(
         end
     end
 
+
+`ifndef SYNTHESIS
+    // M14 simulation-time invariants
+    always_ff @(posedge clk) begin
+        if (rst_n) begin
+            assert (state <= WRITE_RESP)
+                else $error("M14: illegal FSM state");
+
+            assert (queue_count <= COUNT_WIDTH'(QUEUE_DEPTH))
+                else $error("M14: queue occupancy exceeds QUEUE_DEPTH");
+
+            if (state == READ_ADDR || state == READ_DATA ||
+                state == WRITE_ADDR || state == WRITE_DATA ||
+                state == WRITE_RESP) begin
+                assert (beats_total >= 1 &&
+                        beats_total <= MAX_BURST_LEN)
+                    else $error("M14: active burst length out of range");
+            end
+
+            if (state == READ_DATA) begin
+                assert (read_count < beats_total)
+                    else $error("M14: read counter out of range");
+            end
+
+            if (state == WRITE_DATA) begin
+                assert (write_count < beats_total)
+                    else $error("M14: write counter out of range");
+            end
+        end
+    end
+`endif
+
 endmodule

@@ -7,4 +7,6 @@ COCOTB_TEST_MODULES = test_axi_dma,test_axi_dma_model,test_axi_dma_errors,test_a
 VERILOG_SOURCES = $(PWD)/rtl/axi_dma.sv
 PYTHONPATH := $(PWD)/tb/tests:$(PWD)/tb:$(PYTHONPATH)
 
+COMPILE_ARGS += --assert
+
 include $(shell cocotb-config --makefiles)/Makefile.sim
