@@ -1,4 +1,3 @@
-
 module axi_dma #(
     parameter int ADDR_WIDTH = 32,
     parameter int DATA_WIDTH = 32,
@@ -68,13 +67,18 @@ module axi_dma #(
 
     logic [ADDR_WIDTH-1:0] src_addr_reg;
     logic [ADDR_WIDTH-1:0] dst_addr_reg;
-    logic [DATA_WIDTH-1:0] data_reg;
 
-    // This first version transfers exactly one data beat.
-    // Burst support will be added in a later milestone.
+    // Buffer the complete read burst before starting the write burst.
+    logic [DATA_WIDTH-1:0] data_buffer [0:MAX_BURST_LEN-1];
+
+    // Counts are zero-based beat indices while processing data.
+    logic [31:0] beats_total;
+    logic [31:0] read_count;
+    logic [31:0] write_count;
+
     always_comb begin
         m_axi_araddr  = src_addr_reg;
-        m_axi_arlen   = 8'd0;
+        m_axi_arlen   = 8'(beats_total - 1);
         m_axi_arsize  = 3'(BYTE_ADDR_BITS);
         m_axi_arburst = 2'b01;  // INCR
         m_axi_arvalid = 1'b0;
@@ -82,14 +86,14 @@ module axi_dma #(
         m_axi_rready  = 1'b0;
 
         m_axi_awaddr  = dst_addr_reg;
-        m_axi_awlen   = 8'd0;
+        m_axi_awlen   = 8'(beats_total - 1);
         m_axi_awsize  = 3'(BYTE_ADDR_BITS);
         m_axi_awburst = 2'b01;  // INCR
         m_axi_awvalid = 1'b0;
 
-        m_axi_wdata   = data_reg;
+        m_axi_wdata   = '0;
         m_axi_wstrb   = '1;
-        m_axi_wlast   = 1'b1;
+        m_axi_wlast   = 1'b0;
         m_axi_wvalid  = 1'b0;
 
         m_axi_bready  = 1'b0;
@@ -109,6 +113,8 @@ module axi_dma #(
 
             WRITE_DATA: begin
                 m_axi_wvalid = 1'b1;
+                m_axi_wdata  = data_buffer[write_count];
+                m_axi_wlast  = (write_count == beats_total - 1);
             end
 
             WRITE_RESP: begin
@@ -116,7 +122,7 @@ module axi_dma #(
             end
 
             default: begin
-                // All outputs remain at their inactive defaults.
+                // Inactive defaults.
             end
         endcase
     end
@@ -126,12 +132,14 @@ module axi_dma #(
             state        <= IDLE;
             src_addr_reg <= '0;
             dst_addr_reg <= '0;
-            data_reg     <= '0;
+            beats_total  <= 0;
+            read_count   <= 0;
+            write_count  <= 0;
             busy         <= 1'b0;
             done         <= 1'b0;
             error        <= 1'b0;
         end else begin
-            // done and error are one-cycle status pulses.
+            // Status outputs are one-cycle pulses.
             done  <= 1'b0;
             error <= 1'b0;
 
@@ -140,16 +148,25 @@ module axi_dma #(
                     busy <= 1'b0;
 
                     if (start) begin
-                        // Initial M1 contract: exactly one aligned beat.
-                        if ((length_bytes != BYTES_PER_BEAT) ||
+                        // Validate the transfer before issuing AXI traffic.
+                        if ((DATA_WIDTH < 8) ||
+                            ((DATA_WIDTH % 8) != 0) ||
+                            (BYTES_PER_BEAT == 0) ||
+                            (MAX_BURST_LEN < 1) ||
+                            (length_bytes == 0) ||
+                            ((length_bytes % BYTES_PER_BEAT) != 0) ||
+                            ((length_bytes / BYTES_PER_BEAT) > MAX_BURST_LEN) ||
                             (src_addr[BYTE_ADDR_BITS-1:0] != '0) ||
                             (dst_addr[BYTE_ADDR_BITS-1:0] != '0) ||
-                            (DATA_WIDTH < 8) ||
-                            ((DATA_WIDTH % 8) != 0)) begin
+                            (({20'b0, src_addr[11:0]} + {1'b0, length_bytes}) > 33'd4096) ||
+                            (({20'b0, dst_addr[11:0]} + {1'b0, length_bytes}) > 33'd4096)) begin
                             error <= 1'b1;
                         end else begin
                             src_addr_reg <= src_addr;
                             dst_addr_reg <= dst_addr;
+                            beats_total  <= length_bytes / BYTES_PER_BEAT;
+                            read_count   <= 0;
+                            write_count  <= 0;
                             busy         <= 1'b1;
                             state        <= READ_ADDR;
                         end
@@ -158,32 +175,46 @@ module axi_dma #(
 
                 READ_ADDR: begin
                     if (m_axi_arvalid && m_axi_arready) begin
-                        state <= READ_DATA;
+                        read_count <= 0;
+                        state      <= READ_DATA;
                     end
                 end
 
                 READ_DATA: begin
                     if (m_axi_rvalid && m_axi_rready) begin
-                        if ((m_axi_rresp != 2'b00) || !m_axi_rlast) begin
+                        // RLAST must be asserted on exactly the final beat.
+                        if ((m_axi_rresp != 2'b00) ||
+                            (m_axi_rlast != (read_count == beats_total - 1))) begin
                             busy  <= 1'b0;
                             error <= 1'b1;
                             state <= IDLE;
                         end else begin
-                            data_reg <= m_axi_rdata;
-                            state    <= WRITE_ADDR;
+                            data_buffer[read_count] <= m_axi_rdata;
+
+                            if (read_count == beats_total - 1) begin
+                                write_count <= 0;
+                                state       <= WRITE_ADDR;
+                            end else begin
+                                read_count <= read_count + 1;
+                            end
                         end
                     end
                 end
 
                 WRITE_ADDR: begin
                     if (m_axi_awvalid && m_axi_awready) begin
-                        state <= WRITE_DATA;
+                        write_count <= 0;
+                        state       <= WRITE_DATA;
                     end
                 end
 
                 WRITE_DATA: begin
                     if (m_axi_wvalid && m_axi_wready) begin
-                        state <= WRITE_RESP;
+                        if (write_count == beats_total - 1) begin
+                            state <= WRITE_RESP;
+                        end else begin
+                            write_count <= write_count + 1;
+                        end
                     end
                 end
 
