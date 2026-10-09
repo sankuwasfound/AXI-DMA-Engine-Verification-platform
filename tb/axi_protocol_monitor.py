@@ -47,6 +47,25 @@ class AxiProtocolMonitor:
     def _value(signal):
         return int(signal.value)
 
+    def _check_sample(self, name, valid, ready, payload):
+        """Check one sampled channel cycle; also usable in unit tests."""
+        previous = self.stalled[name]
+
+        if previous is not None:
+            assert valid == 1, (
+                f"AXI {name}: VALID dropped while stalled"
+            )
+            assert payload == previous, (
+                f"AXI {name}: payload changed while stalled; "
+                f"previous={previous}, current={payload}"
+            )
+            self.stall_checks[name] += 1
+
+        # Remember the payload if this cycle is stalled.
+        self.stalled[name] = (
+            payload if valid == 1 and ready == 0 else None
+        )
+
     async def run(self):
         dut = self.dut
 
@@ -57,7 +76,7 @@ class AxiProtocolMonitor:
             if not self.active:
                 break
 
-            # A reset cancels any previously observed stall.
+            # Reset cancels any previously observed stall.
             if self._value(dut.rst_n) == 0:
                 for name in self.CHANNELS:
                     self.stalled[name] = None
@@ -73,22 +92,7 @@ class AxiProtocolMonitor:
                     for signal_name in payload_names
                 )
 
-                previous = self.stalled[name]
-
-                if previous is not None:
-                    assert valid == 1, (
-                        f"AXI {name}: VALID dropped while stalled"
-                    )
-                    assert payload == previous, (
-                        f"AXI {name}: payload changed while stalled; "
-                        f"previous={previous}, current={payload}"
-                    )
-                    self.stall_checks[name] += 1
-
-                # Save this cycle if the transfer is currently stalled.
-                self.stalled[name] = (
-                    payload if valid == 1 and ready == 0 else None
-                )
+                self._check_sample(name, valid, ready, payload)
 
     def report(self):
         return {
