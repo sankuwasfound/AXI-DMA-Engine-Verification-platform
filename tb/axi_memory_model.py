@@ -1,8 +1,10 @@
 """AXI memory model for the AXI DMA verification environment.
 
-Supports INCR bursts, byte strobes, and configurable response errors.
-This is a simulation model for the DMA's documented AXI subset, not
-a complete AXI4-compliant slave.
+Supports INCR bursts, byte strobes, configurable response errors,
+and configurable read/write response delays.
+
+This is a simulation model for the DMA's documented AXI subset,
+not a complete AXI4-compliant slave.
 """
 
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
@@ -15,21 +17,30 @@ class AxiMemoryModel:
         initial_memory=None,
         read_resp=0,
         write_resp=0,
+        read_delay_cycles=0,
+        write_response_delay_cycles=0,
     ):
+        if read_delay_cycles < 0 or write_response_delay_cycles < 0:
+            raise ValueError("Response delays must be non-negative")
+
         self.dut = dut
         self.memory = dict(initial_memory or {})
         self.read_resp = read_resp
         self.write_resp = write_resp
+        self.read_delay_cycles = read_delay_cycles
+        self.write_response_delay_cycles = write_response_delay_cycles
 
         self.pending_read_beats = []
         self.read_active = False
         self.clear_read = False
+        self.read_delay_remaining = 0
 
         self.write_address = None
         self.write_beats_remaining = 0
         self.write_error_response_pending = False
         self.write_response_active = False
         self.clear_write_response = False
+        self.write_response_delay_remaining = 0
 
     def initialize(self):
         dut = self.dut
@@ -64,23 +75,30 @@ class AxiMemoryModel:
                 self.write_response_active = False
                 self.clear_write_response = False
 
-            # Present the next read beat, holding it until handshake.
+            # Count down the initial read-response delay.
             if self.pending_read_beats and not self.read_active:
-                data, response, last = self.pending_read_beats.pop(0)
-                dut.m_axi_rdata.value = data
-                dut.m_axi_rresp.value = response
-                dut.m_axi_rlast.value = last
-                dut.m_axi_rvalid.value = 1
-                self.read_active = True
+                if self.read_delay_remaining > 0:
+                    self.read_delay_remaining -= 1
+                else:
+                    data, response, last = self.pending_read_beats.pop(0)
+                    dut.m_axi_rdata.value = data
+                    dut.m_axi_rresp.value = response
+                    dut.m_axi_rlast.value = last
+                    dut.m_axi_rvalid.value = 1
+                    self.read_active = True
 
+            # Count down the write-response delay after the final W beat.
             if (
                 self.write_error_response_pending
                 and not self.write_response_active
             ):
-                dut.m_axi_bresp.value = self.write_resp
-                dut.m_axi_bvalid.value = 1
-                self.write_error_response_pending = False
-                self.write_response_active = True
+                if self.write_response_delay_remaining > 0:
+                    self.write_response_delay_remaining -= 1
+                else:
+                    dut.m_axi_bresp.value = self.write_resp
+                    dut.m_axi_bvalid.value = 1
+                    self.write_error_response_pending = False
+                    self.write_response_active = True
 
             await Timer(1, unit="ps")
 
@@ -134,6 +152,7 @@ class AxiMemoryModel:
                     )
                     for index in range(ar_length + 1)
                 ]
+                self.read_delay_remaining = self.read_delay_cycles
 
             if r_handshake:
                 self.clear_read = True
@@ -175,6 +194,9 @@ class AxiMemoryModel:
                 if self.write_beats_remaining == 0:
                     self.write_address = None
                     self.write_error_response_pending = True
+                    self.write_response_delay_remaining = (
+                        self.write_response_delay_cycles
+                    )
 
             if b_handshake:
                 self.clear_write_response = True
