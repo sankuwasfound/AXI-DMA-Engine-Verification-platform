@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+cocotb-env/
+
+# Simulation build products
+sim_build/
+results.xml
+*.vcd
+*.fst
+*.lxt
+*.lxt2
+
+# Local tool outputs
+obj_dir/
+*.log
