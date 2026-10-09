@@ -5,6 +5,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
+from functional_coverage import hit
 
 
 @cocotb.test()
@@ -72,7 +73,6 @@ async def holds_address_and_write_data_during_stalls(dut):
     for _ in range(300):
         await FallingEdge(dut.clk)
 
-        # Apply READY based on whether this channel has completed its stall.
         for channel, (valid_name, ready_name, _) in signals.items():
             valid_now = int(getattr(dut, valid_name).value)
 
@@ -88,7 +88,6 @@ async def holds_address_and_write_data_during_stalls(dut):
             else:
                 getattr(dut, ready_name).value = 1
 
-        # Allow READY writes to settle before checking signals.
         await Timer(1, unit="ps")
 
         current = {}
@@ -145,6 +144,11 @@ async def holds_address_and_write_data_during_stalls(dut):
             f"Destination mismatch at 0x{address:08X}: "
             f"expected 0x{expected:08X}, got {actual!r}"
         )
+
+    # Record coverage only after every assertion passes.
+    hit("backpressure.ar")
+    hit("backpressure.aw")
+    hit("backpressure.w")
 
     dut._log.info(
         "PASS: 4-beat transfer completed; AR, AW and W stalls verified"

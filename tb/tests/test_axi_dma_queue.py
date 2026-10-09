@@ -5,6 +5,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
+from functional_coverage import hit
 
 
 CLOCK_NS = 10
@@ -112,6 +113,8 @@ async def queued_descriptors_execute_in_fifo_order(dut):
     assert int(dut.queue_empty.value) == 1
     assert int(dut.queue_level.value) == 0
 
+    hit("queue.fifo_order")
+
 
 @cocotb.test()
 async def full_queue_rejects_extra_descriptor(dut):
@@ -166,3 +169,5 @@ async def full_queue_rejects_extra_descriptor(dut):
     assert 0x2500 not in memory.memory, (
         "The extra descriptor was executed despite the full queue"
     )
+
+    hit("queue.full_rejection")

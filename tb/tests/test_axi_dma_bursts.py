@@ -7,6 +7,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
+from functional_coverage import hit_transfer_length
 
 
 async def run_burst_test(dut, beats):
@@ -74,6 +75,9 @@ async def run_burst_test(dut, beats):
         )
 
     assert int(dut.busy.value) == 0, "DMA should be idle after completion"
+
+    # Record coverage only after the transfer and data checks pass.
+    hit_transfer_length(beats)
 
     dut._log.info(
         "PASS: %d-beat burst (%d bytes) copied correctly",

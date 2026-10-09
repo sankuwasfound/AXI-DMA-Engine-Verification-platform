@@ -3,6 +3,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
+from functional_coverage import hit
 
 
 CLOCK_PERIOD_NS = 10
@@ -87,6 +88,8 @@ async def rejects_zero_length_transfer(dut):
     await Timer(1, unit="ps")
     assert int(dut.error.value) == 0, "Error should be a one-cycle pulse"
 
+    hit("error.zero_length")
+
 
 @cocotb.test()
 async def rejects_unaligned_source_address(dut):
@@ -99,6 +102,8 @@ async def rejects_unaligned_source_address(dut):
     assert int(dut.busy.value) == 0, "DMA busy after invalid request"
     assert int(dut.m_axi_arvalid.value) == 0, "Unexpected AXI read request"
     assert int(dut.m_axi_awvalid.value) == 0, "Unexpected AXI write request"
+
+    hit("error.unaligned_source")
 
 
 @cocotb.test()
@@ -121,6 +126,8 @@ async def reports_axi_read_error(dut):
         "DMA unexpectedly wrote destination after read error"
     )
 
+    hit("error.axi_read_slverr")
+
 
 @cocotb.test()
 async def reports_axi_write_error(dut):
@@ -141,3 +148,4 @@ async def reports_axi_write_error(dut):
 
     # A write response error does not guarantee that the slave left memory
     # unchanged. The important check here is that the DMA reports failure.
+    hit("error.axi_write_slverr")

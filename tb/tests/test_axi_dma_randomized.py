@@ -8,6 +8,7 @@ from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from axi_memory_model import AxiMemoryModel
 from axi_protocol_monitor import AxiProtocolMonitor
+from functional_coverage import hit, hit_transfer_length, write_report
 
 
 CLOCK_NS = 10
@@ -153,3 +154,12 @@ async def randomized_descriptors_preserve_data(dut):
     monitor.stop()
     await monitor_task
     dut._log.info("AXI protocol stall checks: %s", monitor.report())
+
+    # Record coverage only after the complete stress test and monitor pass.
+    for descriptor in descriptors:
+        hit_transfer_length(descriptor["words"])
+
+    hit("randomized.seeded_stress")
+
+    # This is the final test module in the Makefile regression.
+    write_report()
