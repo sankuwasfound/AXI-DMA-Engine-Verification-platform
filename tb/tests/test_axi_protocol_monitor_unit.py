@@ -78,3 +78,23 @@ def test_new_transfer_can_start_after_handshake(channel):
     monitor._check_sample(channel, 1, 0, next_payload)
 
     assert monitor.stalled[channel] == next_payload
+
+
+@pytest.mark.parametrize("channel", CHANNEL_PAYLOADS)
+def test_reset_clears_stalled_channel_history(channel):
+    monitor = make_monitor()
+    payload = CHANNEL_PAYLOADS[channel]
+    next_payload = (payload[0] + 4,) + payload[1:]
+
+    # A transaction begins but is stalled.
+    monitor._check_sample(channel, 1, 0, payload)
+    assert monitor.stalled[channel] == payload
+
+    # Exercise the same reset-history logic used by run().
+    monitor._clear_stalled_history()
+
+    # After reset, a fresh transaction may use a different payload.
+    monitor._check_sample(channel, 1, 0, next_payload)
+
+    assert monitor.stalled[channel] == next_payload
+    assert monitor.stall_checks[channel] == 0

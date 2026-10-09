@@ -43,6 +43,11 @@ class AxiProtocolMonitor:
     def stop(self):
         self.active = False
 
+    def _clear_stalled_history(self):
+        """Clear previous stall observations after reset."""
+        for name in self.CHANNELS:
+            self.stalled[name] = None
+
     @staticmethod
     def _value(signal):
         return int(signal.value)
@@ -61,7 +66,6 @@ class AxiProtocolMonitor:
             )
             self.stall_checks[name] += 1
 
-        # Remember the payload if this cycle is stalled.
         self.stalled[name] = (
             payload if valid == 1 and ready == 0 else None
         )
@@ -76,10 +80,8 @@ class AxiProtocolMonitor:
             if not self.active:
                 break
 
-            # Reset cancels any previously observed stall.
             if self._value(dut.rst_n) == 0:
-                for name in self.CHANNELS:
-                    self.stalled[name] = None
+                self._clear_stalled_history()
                 continue
 
             for name, (valid_name, ready_name, payload_names) in (
