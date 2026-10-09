@@ -53,10 +53,6 @@ class AxiMemoryModel:
         while True:
             await FallingEdge(dut.clk)
 
-            dut.m_axi_arready.value = 1
-            dut.m_axi_awready.value = 1
-            dut.m_axi_wready.value = 1
-
             if self.clear_read:
                 dut.m_axi_rvalid.value = 0
                 dut.m_axi_rlast.value = 0
