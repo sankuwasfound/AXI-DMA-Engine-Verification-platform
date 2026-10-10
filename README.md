@@ -1,300 +1,231 @@
-# 🚀 AXI DMA Engine & Verification Platform
+# AXI DMA Engine and Verification Platform
 
-![SystemVerilog](https://img.shields.io/badge/SystemVerilog-RTL-blue)
-![Python](https://img.shields.io/badge/Python-Verification-yellow)
-![cocotb](https://img.shields.io/badge/cocotb-2.1.0-orange)
-![Verilator](https://img.shields.io/badge/Verilator-5.036-green)
-![Tests](https://img.shields.io/badge/Regression-18%2F18%20Passing-brightgreen)
-![Coverage](https://img.shields.io/badge/Functional%20Scenarios-14%2F14-blueviolet)
-![Status](https://img.shields.io/badge/Current%20Milestone-M11-blue)
+A SystemVerilog DMA implementation and Python-based verification environment built around Verilator and cocotb. The project focuses on descriptor-driven transfers, burst behavior, transaction errors, queueing, backpressure, reset behavior, and reproducible verification evidence.
 
-A SystemVerilog-based Direct Memory Access (DMA) engine supported by a Python-driven verification environment using cocotb, Verilator, randomized testing, protocol monitoring, and functional coverage.
+Repository: https://github.com/sankuwasfound/AXI-DMA-Engine-Verification-platform
 
-**Repository:** [AXI-DMA-Engine-Verification-platform](https://github.com/sankuwasfound/AXI-DMA-Engine-Verification-platform)
+## Project status
 
-**Current progress:** M11 completed · M12–M16 planned
+**Current state: M16 verification checkpoint recorded; not production sign-off.**
 
----
+The implementation and verification environment have progressed beyond a basic DMA demonstration. The repository includes a standard cocotb regression, standalone Python unit tests for reusable verification components, a protocol monitor, functional scenario tracking, and a release-readiness report.
 
-## 📌 Project Overview
+The evidence is encouraging, but there are known reset-recovery limitations involving stale AXI responses after a DMA-only reset. Those findings remain open and must not be treated as fixed.
 
-This project aims to develop a reusable DMA engine and a verification platform that tests data integrity, burst transfers, backpressure, descriptor queuing, error handling, reset recovery, and response timing.
+## At a glance
 
-Rather than validating only basic transfers, the project progressively builds a verification environment that exercises difficult transaction scenarios and produces reproducible results.
-
-### 🎯 Objectives
-
-- Implement a memory-to-memory DMA engine in SystemVerilog.
-- Verify AXI-style read and write handshakes.
-- Support and test burst transfers.
-- Handle backpressure and delayed responses.
-- Test descriptor queuing and error recovery.
-- Build reusable Python-based verification components.
-- Introduce randomized testing and functional coverage.
-- Extend the platform with protocol assertions and additional corner-case testing.
-
----
-
-## 📊 Current Verification Results
-
-| Metric | Latest recorded result |
-|---|---:|
-| Regression tests passed | 18/18 |
-| Failed tests | 0 |
-| Skipped tests | 0 |
-| Defined functional scenarios hit | 14/14 |
-| Randomized descriptors checked | 20 |
+| Item | Recorded result |
+|---|---|
+| RTL language | SystemVerilog |
+| Simulator | Verilator 5.036 |
+| Verification framework | cocotb 2.1.0 |
+| Python environment used for the M16 report | Python 3.14.0 |
+| Standard regression | 18 passed, 0 failed, 0 skipped |
+| Standalone unit tests | 41 passed |
+| Defined functional scenarios hit | 14 of 14 |
 | Maximum tested burst | 16 beats |
-| Simulation time | 12,766.03 ns |
+| Recorded simulation duration | 12,766.03 ns |
+| Lint | Completed without reported warnings or errors in the recorded run |
+| Release assessment | Simulation/verification checkpoint only |
 
-The latest recorded regression passed all 18 tests, with 14 of 14 defined functional coverage scenarios hit.
+Functional scenario coverage is not RTL statement, branch, toggle, or condition coverage. Simulation and assertions are not a formal proof of correctness.
 
-**Note:** Functional scenario coverage is not RTL code coverage or formal proof of correctness.
+## Why this project exists
 
----
+A DMA engine is not adequately evaluated by demonstrating one successful copy. Verification must also exercise transaction sequencing, data integrity, response timing, queue behavior, error handling, and the conditions that occur when an AXI channel is stalled.
 
-## 🏗️ Architecture
+This project pairs the RTL with a reusable test environment so that design behavior can be checked repeatedly and failures can be investigated using reproducible tests and recorded evidence.
+
+The current emphasis is on making the behavior observable and documenting limitations honestly, rather than claiming complete AXI4 compliance or production readiness.
+
+## Scope and implemented verification
+
+The recorded regression covers the following areas:
+
+- Basic data transfers and memory-model integration.
+- Descriptor validation, including zero-length and unaligned-address rejection scenarios.
+- Read and write error responses.
+- Burst transfers, including tests up to 16 beats.
+- Address-channel and write-data-channel stalls.
+- Delayed read and write responses.
+- Descriptor queue FIFO ordering and queue-full rejection.
+- Seeded randomized descriptor traffic.
+- Reset scenarios during active or queued work.
+- Protocol-monitor checks for VALID and payload stability while AR, R, AW, W, or B is stalled.
+
+The exact supported AXI subset is determined by the RTL and its tests. The project does not claim complete AXI4 compliance or exhaustive coverage of all legal and illegal protocol combinations.
+
+### Tested configuration recorded in the project README
+
+- Data width: 32 bits.
+- Bytes per beat: 4.
+- Maximum tested burst: 16 beats.
+- Descriptor queue depth: 4.
+- Reset: active-low, synchronous.
+
+These values describe the recorded tested configuration; they should not be interpreted as a claim that every parameter is configurable or that every configuration has been verified.
+
+## Conceptual architecture
 
 ```text
-                 Transfer Descriptor
-            Source / Destination / Length
-                         |
-                         v
-                +------------------+
-                |   DMA Controller |
-                |   State Machine  |
-                +------------------+
-                         |
-                         v
-                +------------------+
-                |   AXI Master     |
-                | Read / Write     |
-                | Transactions     |
-                +------------------+
-                         |
-                         v
-                +------------------+
-                |  AXI Memory Model|
-                | Data / Responses |
-                | Delays / Stalls  |
-                +------------------+
-                         ^
-                         |
-                +------------------+
-                | cocotb Testbench |
-                | Assertions /     |
-                | Checks / Coverage|
-                +------------------+
+                    Transfer descriptor
+              source / destination / length
+                           |
+                           v
+                  +------------------+
+                  |   DMA controller |
+                  |   state machine  |
+                  +------------------+
+                           |
+                           v
+                  +------------------+
+                  |   AXI master     |
+                  | read and write   |
+                  | transactions     |
+                  +------------------+
+                           |
+                           v
+                  +------------------+
+                  | AXI memory model |
+                  | data, responses, |
+                  | delays and stalls|
+                  +------------------+
+                           ^
+                           |
+                  +------------------+
+                  | cocotb testbench |
+                  | checks, monitor, |
+                  | reference data,  |
+                  | scenario tracking|
+                  +------------------+
 ```
 
-This is a conceptual view of the verification environment, not a claim that each block is a separate synthesizable RTL module.
+This diagram describes the relationship between the design and its verification environment. It is conceptual and does not imply that every box is a separate synthesizable RTL module.
 
-### ⚙️ Current tested configuration
+### AXI channels exercised
 
-- Data width: 32 bits
-- Bytes per beat: 4
-- Maximum tested burst: 16 beats
-- Descriptor queue depth: 4
-- Reset: active-low, synchronous
-
-### 🔌 AXI channel groups
-
-- **AR — Read Address:** Issues read requests.
-- **R — Read Data:** Receives source data and response status.
-- **AW — Write Address:** Issues destination write requests.
-- **W — Write Data:** Transfers payload data and byte strobes.
-- **B — Write Response:** Receives write transaction responses.
-
-The verification environment checks handshakes and selected stall and response-timing scenarios. Complete AXI protocol compliance has not yet been established.
-
----
-
-## 🧪 Technology Stack
-
-| Technology | Purpose |
+| Channel | Purpose |
 |---|---|
-| SystemVerilog | DMA RTL implementation |
-| Verilator 5.036 | RTL simulation |
-| cocotb 2.1.0 | Python-based hardware verification |
-| Python | Memory model, tests, and coverage |
-| pytest | Memory-model unit tests |
-| Make | Regression execution |
-| Git and GitHub | Version control and collaboration |
-| GTKWave | Optional waveform debugging |
+| AR | Read-address requests |
+| R | Read data and read response status |
+| AW | Write-address requests |
+| W | Write data and byte strobes |
+| B | Write response status |
 
----
+The verification environment includes checks for selected handshake, stall, and response-timing scenarios. The unresolved reset findings described below are important to interpreting those results.
 
-# 🗺️ Development Roadmap: M1–M16
+## Verification results
 
-The first eleven milestones summarize the existing development progression. M12–M16 are planned and should only be marked complete when implementation and verification evidence are available.
+### Standard cocotb regression
 
-## ✅ M1 — Basic DMA Transfer
+The recorded M16 run used Verilator with simulation assertions enabled.
 
-Implemented the initial memory-to-memory transfer.
+| Metric | Result |
+|---|---:|
+| Tests | 18 |
+| Passed | 18 |
+| Failed | 0 |
+| Skipped | 0 |
+| Simulation duration | 12,766.03 ns |
 
-- Single-word data movement.
-- Source and destination addressing.
-- Basic start and completion behavior.
-- Destination data verification.
+The regression includes transfer, error, burst, stall, delayed-response, queue, randomized-traffic, and reset scenarios.
 
-**Verification:** The test copies `0xDEADBEEF` from `0x00001000` to `0x00002000`.
+Run the regression from the project directory:
 
-## ✅ M2 — Memory Model Integration
+```bash
+cd ~/axi_dma
+source ~/cocotb-env/bin/activate
+export PATH="$HOME/opt/verilator-5.036/bin:$PATH"
+PYTHONPATH="$PWD/tb/tests:$PWD/tb${PYTHONPATH:+:$PYTHONPATH}" \
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 make
+```
 
-Introduced a reusable Python memory model.
+Review the actual command output when rerunning the suite. The numbers above are the recorded M16 results, not a guarantee that every future checkout or environment will produce identical results without changes.
 
-- Initialize source memory.
-- Model memory transactions.
-- Check destination contents.
-- Reuse memory-model behavior across tests.
+### Standalone Python unit tests
 
-## ✅ M3 — Transfer Validation and Error Handling
+The reusable memory-model and protocol-monitor unit tests passed independently of the main RTL regression.
 
-Added tests for invalid transfers and AXI errors.
+| Test suite | Result |
+|---|---:|
+| `test_axi_memory_model_unit.py` | 16 passed |
+| `test_axi_protocol_monitor_unit.py` | 25 passed |
+| **Total** | **41 passed** |
 
-- Zero-length transfer rejection.
-- Unaligned source-address rejection.
-- Read-response `SLVERR`.
-- Write-response `SLVERR`.
-- Error versus successful completion checks.
+Run them with:
 
-## ✅ M4 — Burst Transfers
+```bash
+cd ~/axi_dma
+source ~/cocotb-env/bin/activate
+PYTHONPATH="$PWD/tb:$PWD/tb/tests${PYTHONPATH:+:$PYTHONPATH}" \
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+  python -m pytest -v \
+  tb/tests/test_axi_memory_model_unit.py \
+  tb/tests/test_axi_protocol_monitor_unit.py
+```
 
-Expanded testing beyond single-word transactions.
+### RTL lint
 
-- Two-beat bursts.
-- Four-beat bursts.
-- Maximum 16-beat burst.
-- Per-beat destination data checks.
+The recorded lint command was:
 
-## ✅ M5 — Backpressure Handling
+```bash
+cd ~/axi_dma
+verilator --lint-only --assert -Wall -Wno-fatal \
+  --top-module axi_dma rtl/axi_dma.sv
+```
 
-Added stalls to selected AXI channels.
+The recorded run completed without reported warnings or errors. Because `-Wno-fatal` is enabled, lint cleanliness should be judged from the emitted diagnostics, not from the exit status alone.
 
-- Read-address (`AR`) stalls.
-- Write-address (`AW`) stalls.
-- Write-data (`W`) stalls.
-- Checks for stable transaction information during tested stalls.
+### Functional scenario coverage
 
-Dedicated response-channel backpressure testing remains future work.
+The regression reported **14 of 14 defined functional scenarios hit**.
 
-## ✅ M6 — Delayed Response Handling
+The defined scenarios include transfer lengths, invalid requests, AXI read/write error responses, address and write-data backpressure, queue FIFO ordering, queue-full rejection, and seeded randomized stress.
 
-Extended the memory model to delay read and write responses.
+This is coverage of the scenarios defined by the project. It is not evidence of 100% RTL code coverage, exhaustive input-space exploration, or formal correctness.
 
-- Configurable read-response delay.
-- Configurable write-response delay.
-- Checks that completion waits for responses.
-- Data integrity verification after delayed responses.
+### Isolated response-backpressure harness
 
-## ✅ M7 — Descriptor Queue
+A separate response-channel backpressure harness passed its standalone test (1 of 1 in the recorded report). It is an isolated harness, not proof that the production DMA RTL safely supports every possible multi-cycle R- or B-channel stall. Keep this distinction in mind when interpreting the result.
 
-Added queued-transfer verification.
+## Reset-recovery findings
 
-- Multiple descriptors.
-- FIFO-order execution.
-- Full-queue rejection.
-- Checks against descriptor loss or reordering.
+Two diagnostic tests reproduced unresolved problems. A passing diagnostic means the test successfully reproduced the targeted issue; it does not mean the issue was fixed.
 
-## ✅ M8 — Randomized Descriptor Testing
+### Stale read response after DMA-only reset
 
-Introduced repeatable randomized transactions.
+The diagnostic observed destination data `0xDEADCAFE` where the fresh transfer was expected to deliver `0x12345678`.
 
-- Seeded randomized descriptors.
-- Data-integrity checks.
-- Reproducible test execution.
-- Debug output containing the random seed.
+**Finding:** A stale read response could be consumed as data for a fresh transfer after the DMA was reset.
 
-**Latest recorded evidence:** 20 randomized descriptors passed with seed `23063`.
+### Stale write response after DMA-only reset
 
-## ✅ M9 — Reset Recovery
+The diagnostic found that an old successful B response could be accepted as completion of a fresh transaction before the fresh transaction's own response was generated.
 
-Tested recovery from reset during active work.
+**Finding:** A stale write response could be misattributed to a new transaction.
 
-- Reset during a delayed read.
-- Reset during a write burst.
-- Reset with queued descriptors.
-- Fresh transfers after reset.
+### Why this matters
 
-## ✅ M10 — Memory Model Unit Tests
+The ordinary reset tests clear pending responses in the memory model. They therefore do not prove that the DMA is safe when an external AXI slave or interconnect continues operating across a DMA-only reset.
 
-Strengthened independent testing of the Python memory model.
+A robust solution needs an explicit reset and transaction-lifecycle contract. Depending on the system, possible approaches include coordinated reset, quiescing traffic before reset, draining outstanding transactions, or a suitable transaction-epoch mechanism. The correct design depends on the integration requirements and must be implemented and retested before claiming robust reset recovery.
 
-- Configuration validation.
-- Deterministic randomized-ready behavior.
-- Byte-strobe updates.
-- Write-response delay configuration.
-- Seeded delay reproducibility.
+The detailed evidence is recorded in [M16 Release Readiness](docs/m16_release_readiness.md).
 
-**Recorded result:** 16 unit tests passed.
+## Known limitations
 
-## ✅ M11 — Write-Response Timing Verification
+1. **Stale response handling remains unresolved.** R and B responses from before a DMA-only reset can be misattributed to a post-reset transfer.
+2. **Reset integration assumptions need to be explicit.** External AXI transactions may outlive a reset applied only to the DMA.
+3. **Complete AXI4 compliance has not been established.** The tested subset is not exhaustive protocol certification.
+4. **Functional coverage is limited to defined scenarios.** The 14/14 result is not RTL code coverage.
+5. **Formal proof has not been established.** Simulation assertions and regression results are not a formal verification result.
+6. **Response backpressure evidence is limited.** The isolated harness does not establish arbitrary response-stall robustness in the production RTL.
+7. **FPGA readiness has not been demonstrated.** No claim of synthesis sign-off, timing closure, or hardware validation is made here.
+8. **Performance characterization is incomplete.** Throughput and latency claims require a documented measurement methodology and measured results.
 
-Strengthened response timing checks and memory-model helpers.
+## Repository guide
 
-- Extracted byte-strobe handling into a helper.
-- Added write-response delay scheduling.
-- Tested fixed and seeded-random delay behavior.
-- Measured final write-beat to `BVALID` timing.
-- Preserved regression compatibility.
-
-**Recorded result:** All 18 regression tests passed.
-
-## 🔄 M12 — AXI Response-Channel Backpressure
-
-**Planned**
-
-- Verify `RVALID/RREADY` handshake behavior.
-- Verify `BVALID/BREADY` handshake behavior.
-- Test responses held while the receiver is not ready.
-- Ensure completion does not occur before the required handshake.
-- Add dedicated response-channel stall tests.
-
-## 🔄 M13 — Protocol Assertions
-
-**Planned**
-
-- Add reusable protocol invariants.
-- Check payload stability during stalls.
-- Check transaction sequencing.
-- Detect unexpected state transitions.
-- Evaluate SystemVerilog assertions and cocotb monitors.
-
-## 🔄 M14 — Corner Cases and Fault Injection
-
-**Planned**
-
-- Expand reset and error timing scenarios.
-- Test additional boundary conditions.
-- Inject controlled transaction faults.
-- Exercise randomized legal stalls.
-- Preserve seeds and debug information for reproducibility.
-
-## 🔄 M15 — Performance Metrics and Coverage Expansion
-
-**Planned**
-
-- Measure transfer latency.
-- Count stall cycles by channel.
-- Track bytes transferred and effective throughput.
-- Expand functional coverage bins.
-- Produce reproducible regression summaries.
-
-## 🔄 M16 — Final Verification and Release Readiness
-
-**Planned**
-
-- Run the complete regression from a clean build.
-- Review warnings and known limitations.
-- Document the implemented AXI subset.
-- Add formal verification only where the tool flow supports it and the properties are actually proven.
-- Explore synthesis reports where appropriate.
-- Publish final verification evidence.
-- Tag a release after acceptance criteria are met.
-
----
-
-## 📁 Repository Structure
+The main areas of the repository are:
 
 ```text
 axi_dma/
@@ -305,105 +236,62 @@ axi_dma/
 │   ├── axi_protocol_monitor.py
 │   ├── functional_coverage.py
 │   └── tests/
-│       ├── test_axi_dma.py
-│       ├── test_axi_dma_model.py
-│       ├── test_axi_dma_errors.py
-│       ├── test_axi_dma_bursts.py
-│       ├── test_axi_dma_backpressure.py
-│       ├── test_axi_dma_response_delays.py
-│       ├── test_axi_dma_queue.py
-│       ├── test_axi_dma_randomized.py
-│       ├── test_axi_dma_reset.py
-│       └── test_axi_memory_model_unit.py
+├── docs/
+│   └── m16_release_readiness.md
 ├── Makefile
+├── .gitignore
 └── README.md
 ```
 
-This is a summary of the main project files; the exact repository structure may evolve.
+This is a high-level guide to the main components, not a guarantee that every test file is listed. Consult the repository for the current file inventory.
 
----
+- **`rtl/`** — DMA RTL.
+- **`tb/axi_memory_model.py`** — Python-side memory and response behavior used by verification.
+- **`tb/axi_protocol_monitor.py`** — reusable protocol-monitor checks.
+- **`tb/functional_coverage.py`** — functional scenario tracking.
+- **`tb/tests/`** — directed, randomized, diagnostic, and unit tests.
+- **`docs/m16_release_readiness.md`** — recorded test evidence, reset diagnostics, and readiness assessment.
+- **`.gitignore`** — excludes Python artifacts and simulation build products, including the named local build directories.
 
-## 🛠️ Setup and Execution
+Generated simulation output and local backup files are not part of the intended source deliverables.
 
-### 1. Activate the Python environment
+## Reproducibility notes
 
-```bash
-cd ~/axi_dma
-source ~/cocotb-env/bin/activate
-export PATH="$HOME/opt/verilator-5.036/bin:$PATH"
-```
+- Use the tool versions recorded in the readiness report when comparing results.
+- Keep random seeds in test output and retain failing seeds.
+- Read diagnostic test names and descriptions carefully; some diagnostics are designed to reproduce known failures.
+- Inspect waveforms and logs when a test fails rather than relying only on a summary count.
+- Re-run lint and regression after RTL or testbench changes.
+- Keep the documentation aligned with the actual implementation and most recent test evidence.
 
-### 2. Run the full regression
+## Development priorities
 
-```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 make
-```
+The next work should focus on correctness gaps rather than simply adding more tests or increasing headline coverage.
 
-### 3. Run memory-model unit tests
+1. Define the system-level reset contract for outstanding AXI transactions.
+2. Design a recovery strategy that prevents pre-reset responses from being attributed to post-reset transactions.
+3. Add regression tests that retain outstanding external responses across a DMA-only reset.
+4. Re-run the stale-R and stale-B diagnostics and demonstrate that the corrected behavior passes.
+5. Integrate response-channel backpressure scenarios into the production RTL regression, with clear assumptions about legal AXI behavior.
+6. Re-run the full regression, unit tests, and lint; preserve tool versions, logs, and random seeds.
+7. Reassess release readiness only after the findings are closed with evidence.
 
-```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-PYTHONPATH="$PWD/tb:$PWD/tb/tests" \
-python -m pytest -q tb/tests/test_axi_memory_model_unit.py
-```
+## Technical references
 
-Review the final regression summary, test failures, random seed, and coverage report.
+Prefer specifications and official tool documentation over informal summaries. The exact applicable AXI specification revision and implementation subset should be documented as the design evolves.
 
----
+- [Arm AMBA specifications](https://developer.arm.com/Architectures/AMBA) — AXI protocol semantics.
+- [IEEE Standards](https://standards.ieee.org/) — SystemVerilog language standards.
+- [Verilator documentation](https://verilator.org/guide/latest/) — linting, simulation, and supported language features.
+- [cocotb documentation](https://docs.cocotb.org/) — Python-based hardware verification.
+- [GTKWave documentation](https://gtkwave.github.io/gtkwave/) — waveform inspection.
+- [Accellera](https://www.accellera.org/) — verification methodology resources.
+- [Yosys documentation](https://yosyshq.readthedocs.io/) — optional synthesis and RTL exploration.
+- [SymbiYosys documentation](https://symbiyosys.readthedocs.io/) — optional formal-verification workflows.
+- [AMD Vivado documentation](https://docs.amd.com/) — optional FPGA implementation and timing analysis.
 
-## 📈 Verification Methodology
+## Engineering standard
 
-### Directed testing
-Exercises specific scenarios such as single-word copies, maximum bursts, invalid requests, and reset recovery.
+The goal is not to present the DMA as finished merely because a regression passes. The goal is to build a reusable RTL component whose supported behavior is specified, whose important failure modes are tested, whose limitations are visible, and whose readiness claims are backed by reproducible evidence.
 
-### Reference data checking
-Compares destination memory contents with expected source data.
-
-### Randomized testing
-Broadens the transaction space using reproducible random seeds.
-
-### Timing and stall testing
-Introduces backpressure and delayed responses to exercise non-zero-wait-state behavior.
-
-### Unit testing
-Tests reusable memory-model functionality independently of the RTL regression.
-
-### Functional coverage
-Tracks explicitly defined verification scenarios and reports which scenarios were observed.
-
-These methods complement each other; none alone proves complete protocol compliance.
-
----
-
-## ⚠️ Known Limitations
-
-- Full AXI compliance has not been established.
-- Functional coverage does not equal RTL code coverage.
-- Randomized testing is not exhaustive.
-- Formal correctness has not been established merely by simulation.
-- FPGA synthesis and timing closure have not been demonstrated by the current regression.
-- Dedicated response-channel backpressure verification remains planned.
-- Performance claims should be based on measured results from a documented methodology.
-
----
-
-## 📚 References
-
-- [Arm AMBA Specifications](https://developer.arm.com/Architectures/AMBA)
-- [SystemVerilog Standards](https://standards.ieee.org/)
-- [Verilator Documentation](https://verilator.org/guide/latest/)
-- [cocotb Documentation](https://docs.cocotb.org/)
-- [GTKWave](https://gtkwave.github.io/gtkwave/)
-- [Yosys Documentation](https://yosyshq.readthedocs.io/)
-- [SymbiYosys Documentation](https://symbiyosys.readthedocs.io/)
-- [AMD Vivado Documentation](https://docs.amd.com/)
-
----
-
-## 🎯 Project Goal
-
-Build a reusable DMA IP and a robust verification platform that goes beyond basic data movement through systematic testing of timing, backpressure, error handling, reset recovery, and transaction corner cases.
-
-**Current milestone:** M11 — Write-Response Timing Verification  
-**Next milestone:** M12 — AXI Response-Channel Backpressure  
-**Target milestone:** M16 — Final Verification and Release Readiness
+**Current checkpoint:** regression, unit-test, lint, and functional-scenario evidence recorded; stale-response reset-recovery findings remain open.
