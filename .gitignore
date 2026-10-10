@@ -15,3 +15,8 @@ results.xml
 # Local tool outputs
 obj_dir/
 *.log
+
+# Named simulation build artifacts
+sim_build_m15_read/
+sim_build_m15_write/
+sim_build_response_backpressure/
