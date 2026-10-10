@@ -22,6 +22,7 @@ RANDOM_SEED = 0x5A17
 async def setup_dma(dut, memory):
     dut.clk.value = 0
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = 0x1000
     dut.dst_addr.value = 0x8000

@@ -25,6 +25,7 @@ async def single_word_copy_test(dut):
 
     # Initialize control and AXI slave inputs.
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = source_address
     dut.dst_addr.value = destination_address

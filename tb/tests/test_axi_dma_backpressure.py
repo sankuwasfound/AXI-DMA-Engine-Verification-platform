@@ -26,6 +26,7 @@ async def holds_address_and_write_data_during_stalls(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = src_addr
     dut.dst_addr.value = dst_addr

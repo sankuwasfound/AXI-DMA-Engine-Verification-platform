@@ -1,0 +1,23 @@
+{
+  "coverage_type": "functional scenario coverage",
+  "covered_points": 14,
+  "total_points": 14,
+  "coverage_percent": 100.0,
+  "hits": {
+    "transfer.single_beat": 2,
+    "transfer.short_burst_2_to_4": 3,
+    "transfer.long_burst_5_to_15": 16,
+    "transfer.maximum_16_beat_burst": 2,
+    "error.zero_length": 1,
+    "error.unaligned_source": 1,
+    "error.axi_read_slverr": 1,
+    "error.axi_write_slverr": 1,
+    "backpressure.ar": 1,
+    "backpressure.aw": 1,
+    "backpressure.w": 1,
+    "queue.fifo_order": 1,
+    "queue.full_rejection": 1,
+    "randomized.seeded_stress": 1
+  },
+  "uncovered_points": []
+}

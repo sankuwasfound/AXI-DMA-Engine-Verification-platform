@@ -16,6 +16,7 @@ async def prepare_dut(dut, memory_model=None):
     """Reset the DMA and start the clock and optional AXI memory model."""
     dut.clk.value = 0
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = SOURCE
     dut.dst_addr.value = DESTINATION

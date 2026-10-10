@@ -7,6 +7,9 @@ module axi_dma #(
     input  logic                   clk,
     input  logic                   rst_n,
 
+    // System asserts this only after pre-reset AXI responses are impossible.
+    input  logic                   recovery_ready,
+
     // Transfer submission interface
     input  logic                   start,
     input  logic [ADDR_WIDTH-1:0]  src_addr,
@@ -144,12 +147,13 @@ module axi_dma #(
         enqueue_descriptor = 1'b0;
         dequeue_descriptor = 1'b0;
 
-        if (start && !((state == IDLE) && (queue_count == 0))) begin
+        if (recovery_ready && start &&
+            !((state == IDLE) && (queue_count == 0))) begin
             if (queue_count < COUNT_WIDTH'(QUEUE_DEPTH))
                 enqueue_descriptor = 1'b1;
         end
 
-        if ((state == IDLE) && (queue_count != 0))
+        if (recovery_ready && (state == IDLE) && (queue_count != 0))
             dequeue_descriptor = 1'b1;
     end
 
@@ -181,7 +185,7 @@ module axi_dma #(
             end
 
             READ_DATA: begin
-                m_axi_rready = 1'b1;
+                m_axi_rready = recovery_ready;
             end
 
             WRITE_ADDR: begin
@@ -195,7 +199,7 @@ module axi_dma #(
             end
 
             WRITE_RESP: begin
-                m_axi_bready = 1'b1;
+                m_axi_bready = recovery_ready;
             end
 
             default: begin
@@ -251,7 +255,7 @@ module axi_dma #(
                 IDLE: begin
                     busy <= 1'b0;
 
-                    if ((queue_count != 0) || start) begin
+                    if (recovery_ready && ((queue_count != 0) || start)) begin
                         if (candidate_valid) begin
                             src_addr_reg <= candidate_src;
                             dst_addr_reg <= candidate_dst;

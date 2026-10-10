@@ -14,6 +14,7 @@ async def dma_copies_word_into_model_memory(dut):
 
     # Reset and configure the DMA.
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = source_address
     dut.dst_addr.value = destination_address

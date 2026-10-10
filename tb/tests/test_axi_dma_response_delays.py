@@ -14,6 +14,7 @@ async def start_transfer(dut, memory, src_addr, dst_addr, length_bytes):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = src_addr
     dut.dst_addr.value = dst_addr

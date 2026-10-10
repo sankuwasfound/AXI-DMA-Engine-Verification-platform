@@ -15,6 +15,7 @@ QUEUE_DEPTH = 4
 async def setup_dma(dut, memory):
     dut.clk.value = 0
     dut.rst_n.value = 0
+    dut.recovery_ready.value = 1
     dut.start.value = 0
     dut.src_addr.value = 0x1000
     dut.dst_addr.value = 0x2000
@@ -62,6 +63,7 @@ async def assert_reset_state(dut):
     """Apply synchronous active-low reset and check cleared status."""
     await FallingEdge(dut.clk)
     dut.start.value = 0
+    dut.recovery_ready.value = 0
     dut.rst_n.value = 0
 
     for _ in range(2):
@@ -134,6 +136,7 @@ async def reset_aborts_delayed_read_and_recovers(dut):
     memory.read_delay_remaining = 0
     dut.m_axi_rvalid.value = 0
     dut.m_axi_rlast.value = 0
+    dut.recovery_ready.value = 1
 
     # The aborted descriptor must not write to its destination.
     for _ in range(5):
@@ -205,6 +208,7 @@ async def reset_aborts_write_burst_and_recovers(dut):
     memory.write_error_response_pending = False
     memory.clear_write_response = False
     memory.write_response_delay_remaining = 0
+    dut.recovery_ready.value = 1
 
     # The reset descriptor must not resume writing after reset.
     for _ in range(8):
@@ -257,6 +261,7 @@ async def reset_clears_queued_descriptors(dut):
     memory.read_delay_remaining = 0
     dut.m_axi_rvalid.value = 0
     dut.m_axi_rlast.value = 0
+    dut.recovery_ready.value = 1
 
     for _ in range(8):
         await RisingEdge(dut.clk)
