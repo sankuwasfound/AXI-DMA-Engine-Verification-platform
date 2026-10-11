@@ -173,39 +173,26 @@ The project consists of the DMA RTL and its surrounding verification environment
 
 ## 5.1 Conceptual architecture
 
-```text
-                   Transfer Descriptor
-             Source / Destination / Length
-                           |
-                           v
-                 +---------------------+
-                 |   DMA Controller    |
-                 |   State Machine     |
-                 +---------------------+
-                           |
-                           v
-                 +---------------------+
-                 |     AXI Master      |
-                 | Read and Write      |
-                 | Transaction Control |
-                 +---------------------+
-                           |
-                           v
-                 +---------------------+
-                 |   AXI Memory Model  |
-                 | Data and Responses  |
-                 | Delays and Stalls   |
-                 +---------------------+
-                           ^
-                           |
-                 +---------------------+
-                 |   cocotb Testbench  |
-                 | Data Checks         |
-                 | Protocol Monitoring |
-                 | Assertions/Checks   |
-                 | Functional Coverage |
-                 +---------------------+
-```
+## System Architecture
+
+The following diagram illustrates the data flow from the Transfer Descriptor through the DMA Controller and AXI interfaces, monitored by the cocotb testbench:
+
+```mermaid
+flowchart TD
+    %% Input Trigger
+    Desc(Transfer Descriptor<br/>Source / Destination / Length)
+
+    %% Architecture Blocks
+    DMA[DMA Controller<br/>State Machine]
+    AXI_M[AXI Master<br/>Read and Write<br/>Transaction Control]
+    AXI_MEM[AXI Memory Model<br/>Data and Responses<br/>Delays and Stalls]
+    TB[cocotb Testbench<br/>Data Checks<br/>Protocol Monitoring<br/>Assertions/Checks<br/>Functional Coverage]
+
+    %% Flow Connections
+    Desc --> DMA
+    DMA --> AXI_M
+    AXI_M --> AXI_MEM
+    TB -->|Monitors / Drives| AXI_MEM
 
 This is a conceptual representation of the design and verification relationship. It does not imply that every block shown is a separate synthesizable RTL module.
 
